@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+// Event Schema
 const eventSchema = new mongoose.Schema({
     eventTitle: { type: String, required: true, unique: true },
     eventPassword: { type: String },

@@ -8,6 +8,7 @@ import { CustomError } from "./errorMiddleware.js";
 configDotenv();
 const { ACCESS_TOKEN_SECRET, REFRESH_TOKEN_SECRET, NODE_ENV } = process.env;
 
+// IsAuth Middlware for checking if the user is authenticated
 const isAuth = (req, res, next) => {
     try {
         const accessToken = req.cookies.access_token;
@@ -16,16 +17,11 @@ const isAuth = (req, res, next) => {
         // Verify Access Token
         jwt.verify(accessToken, ACCESS_TOKEN_SECRET, async (err, decoded) => {
             if (err) {
-                if (err.name === "TokenExpiredError") {
-                    return await handleTokenRefresh(req, res, next);
-                }
+                if (err.name === "TokenExpiredError") return await handleTokenRefresh(req, res, next);
                 return next(new CustomError("Something went wrong, Login again!", RouteCode.LOGOUT_REQESTED.statusCode));
             }
 
-            if (!decoded || !decoded.id) {
-                return next(new CustomError("Something went wrong, Login again!", RouteCode.LOGOUT_REQESTED.statusCode))
-            }
-
+            if (!decoded || !decoded.id) return next(new CustomError("Something went wrong, Login again!", RouteCode.LOGOUT_REQESTED.statusCode))
             req.user = decoded;
             return next();
         });
@@ -35,12 +31,15 @@ const isAuth = (req, res, next) => {
 // Handle Token Refresh
 const handleTokenRefresh = async (req, res, next) => {
     try {
+        // Get the refresh token from the cookies
         const refreshToken = req.cookies.refresh_token;
         if (!refreshToken) return next(new CustomError("Something went wrong, Login again!", 440));
 
+        // Find the user with the refresh token
         const foundUser = await User.findOne({ refresh_token: refreshToken });
         if (!foundUser) return next(new CustomError("Something went wrong, Login again!", 440));
 
+        // Verify the refresh token
         jwt.verify(refreshToken, REFRESH_TOKEN_SECRET, (err, decoded) => {
             if (err) {
                 res.clearCookie("access_token");

@@ -12,6 +12,7 @@ const getParticipantsList = async (req, res, next) => {
         const foundUser = await getReqUser(req, res, next);
         const userList = await User.find({ _id: { $ne: foundUser._id } });
 
+        // Prepare a list of users for the dropdown
         const finalList = userList.reduce((acc, currUser) => {
             acc.push({
                 id: currUser._id,
@@ -26,6 +27,7 @@ const getParticipantsList = async (req, res, next) => {
         next(error);
     }
 }
+
 // Get Events List (Created by User)
 const getEventsList = async (req, res, next) => {
     let { page = 1, limit = 10 } = req.query;
@@ -33,11 +35,10 @@ const getEventsList = async (req, res, next) => {
     limit = parseInt(limit);
     try {
         const foundUser = await getReqUser(req, res, next);
+
         // Get Total Count (for pagination metadata)
         const totalEvents = await Event.countDocuments({ hostID: foundUser._id });
         const totalPages = Math.ceil(totalEvents / limit);
-
-
         const userEvents = await Event.find({ hostID: foundUser._id }).skip((page - 1) * limit).limit(limit);
 
         // Fetch events where the user is a participant (accepted status)
@@ -89,7 +90,8 @@ const getEventsList = async (req, res, next) => {
         next(error);
     }
 }
-// Get Events List For Calendar
+
+// Get Events List For Calendar (All Evnets for the User - Created or Participated)
 const getEventsListForCalendar = async (req, res, next) => {
     try {
         const foundUser = await getReqUser(req, res, next);
@@ -127,8 +129,8 @@ const getEventsListForCalendar = async (req, res, next) => {
 // Create New Event
 const postEvent = async (req, res, next) => {
     const { bannerImg, color, date, description, duration, eventLink, hostName, id, participants, password, time, timeZone, topic } = req.body;
-
     if (!topic || !date || !time || !duration || !participants || !eventLink) return next(new CustomError('Invalid details shared!', RouteCode.BAD_REQUEST.statusCode));
+
     try {
         const foundUser = await getReqUser(req, res, next);
         const foundSimilarName = await Event.findOne({ eventTitle: topic.trim() });
@@ -159,6 +161,7 @@ const postEvent = async (req, res, next) => {
 
         await newEvent.save();
 
+        // Add participants to the event
         const participantsList = typeof participants === 'string' ? participants.split(',') : participants;
         if (newEvent._id && participantsList.length > 0) {
             await eventParticipants(participantsList, newEvent._id)
@@ -168,22 +171,13 @@ const postEvent = async (req, res, next) => {
         next(error);
     }
 }
+
 // Add/Update Event Participants
 const eventParticipants = async (participants, eventID) => {
-    if (!Array.isArray(participants) && participants.length <= 0) {
-        return {
-            message: 'No participants found!',
-            status: RouteCode.BAD_REQUEST.statusCode
-        }
-    }
+    if (!Array.isArray(participants) && participants.length <= 0) return { message: 'No participants found!', status: RouteCode.BAD_REQUEST.statusCode }
     try {
         const foundEvent = await Event.findById(eventID);
-        if (!foundEvent) {
-            return {
-                message: 'Event not found!',
-                status: RouteCode.NOT_FOUND.statusCode
-            }
-        }
+        if (!foundEvent) return { message: 'Event not found!', status: RouteCode.NOT_FOUND.statusCode }
 
         // Existing Participants
         const existingParticipants = await UserEvent.find({ eventID }).select('userID')
@@ -197,20 +191,14 @@ const eventParticipants = async (participants, eventID) => {
         // Remove participants not in the new list
         await UserEvent.deleteMany({ eventID, userID: { $nin: newUserIDs } });
 
-
         // Add new participants
         const newParticipants = newUserIDs
             .filter(id => !existingUserIDs.includes(id))
             .map(userID => ({ eventID, userID }));
 
-        if (newParticipants.length) {
-            await UserEvent.insertMany(newParticipants);
-        }
+        if (newParticipants.length) await UserEvent.insertMany(newParticipants);
 
-        return {
-            message: 'Participants updated successfully!',
-            status: RouteCode.SUCCESS.statusCode
-        };
+        return { message: 'Participants updated successfully!', status: RouteCode.SUCCESS.statusCode };
     } catch (error) {
         return {
             message: 'Something went wrong!',
@@ -218,15 +206,26 @@ const eventParticipants = async (participants, eventID) => {
         };
     }
 }
+
 // Find If User is available in the defined time slot
 export const findIfUserIsAvailable = async (startTime, endTime, date, foundUser) => {
     const eventDay = startTime.toLocaleString('en-US', { weekday: 'short' });
 
     // Check if the user is available on this day
     if (!foundUser.day_availability[eventDay] || !foundUser.day_availability[eventDay].available) {
+        return { status: RouteCode.CONFLICT.statusCode, message: `You are not available on ${eventDay}!` };
+    }
+
+
+    // Check if the user already has an event scheduled at this time
+    const conflictingEvent = await Event.findOne({
+        hostID: foundUser._id,
+        $or: [{ eventStDateTime: { $lt: endTime }, eventEdDateTime: { $gt: startTime } }]
+    });
+    if (conflictingEvent) {
         return {
             status: RouteCode.CONFLICT.statusCode,
-            message: `You are not available on ${eventDay}!`,
+            message: `You already have an event at ${conflictingEvent.eventStDateTime.toLocaleTimeString()}-${conflictingEvent.eventEdDateTime.toLocaleTimeString()} on ${eventDay}!`,
         };
     }
 
@@ -245,6 +244,7 @@ export const findIfUserIsAvailable = async (startTime, endTime, date, foundUser)
             };
         }
     }
+
 
     return {
         status: RouteCode.CONFLICT.statusCode,
@@ -289,21 +289,26 @@ const getEventDetailByID = async (req, res, next) => {
         next(error);
     }
 }
+
 // Put Event Detail
 const patchEventDetailByID = async (req, res, next) => {
     const { bannerImg, color, date, description, duration, eventLink, hostName, id, participants, password, time, timeZone, topic } = req.body;
     if (!topic || !date || !time || !duration || !participants || !eventLink || !id) return next(new CustomError('Invalid details shared!', RouteCode.BAD_REQUEST.statusCode));
     try {
         const foundUser = await getReqUser(req, res, next);
+
+        // Find the event by ID that you're updating
         const foundEvent = await Event.findById(id);
         if (!foundEvent) return next(new CustomError("Event not found!", RouteCode.NOT_FOUND.statusCode));
 
+        // Check if the user is the host of the event
         if (foundEvent.hostID.toString() !== foundUser._id.toString()) return next(new CustomError("You are not authorized to update this event!", RouteCode.UNAUTHORIZED.statusCode));
 
         const eventStDateTime = new Date(`${date}T${time}:00`);
         let durationInMinutes = { "30m": 30, "1hr": 60, "2hr": 120 }[duration] || 30;
         const eventEdDateTime = new Date(eventStDateTime.getTime() + durationInMinutes * 60000);
 
+        // Check if the user is available at the time of the event
         const timeValidation = await findIfUserIsAvailable(eventStDateTime, eventEdDateTime, date, foundUser);
         if (timeValidation.status !== RouteCode.SUCCESS.statusCode) return next(new CustomError(timeValidation.message, timeValidation.status));
 
@@ -329,18 +334,15 @@ const patchEventDetailByID = async (req, res, next) => {
         next(error);
     }
 }
+
 // Toggle Event Active Status
 const toggleEventStatus = async (req, res, next) => {
     const { eventID } = req.params;
-    if (!eventID) {
-        return next(new CustomError("Invalid Event ID!", RouteCode.BAD_REQUEST.statusCode));
-    }
+    if (!eventID) return next(new CustomError("Invalid Event ID!", RouteCode.BAD_REQUEST.statusCode));
 
     try {
         const foundEvent = await Event.findById(eventID);
-        if (!foundEvent) {
-            return next(new CustomError("Event not found!", RouteCode.NOT_FOUND.statusCode));
-        }
+        if (!foundEvent) return next(new CustomError("Event not found!", RouteCode.NOT_FOUND.statusCode));
 
         foundEvent.isActive = !foundEvent.isActive;
         await foundEvent.save();
@@ -350,18 +352,16 @@ const toggleEventStatus = async (req, res, next) => {
         next(error);
     }
 }
+
 // Delete Event
 const deleteEvent = async (req, res, next) => {
     const { eventID } = req.params;
     try {
         const foundEvent = await Event.findById(eventID);
-        if (!foundEvent) {
-            return next(new CustomError("Event not found!", RouteCode.NOT_FOUND.statusCode));
-        }
+        if (!foundEvent) return next(new CustomError("Event not found!", RouteCode.NOT_FOUND.statusCode));
 
+        // Delete the event itself and all the participants
         await UserEvent.deleteMany({ eventID });
-
-        // Delete the event itself
         await Event.findByIdAndDelete(eventID);
         return res.status(RouteCode.SUCCESS.statusCode).json({ message: "Event deleted successfully" });
     } catch (error) {

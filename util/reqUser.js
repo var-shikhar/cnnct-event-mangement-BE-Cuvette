@@ -2,6 +2,7 @@ import { CustomError } from "../middleware/errorMiddleware.js";
 import User from "../modal/user-modal.js";
 import RouteCode from "./httpStatus.js";
 
+// Get the user from the request
 const getReqUser = async (req, res, next) => {
     const { id } = req.user;
     if (!id) return next(new CustomError(RouteCode.LOGOUT_REQESTED.message, RouteCode.LOGOUT_REQESTED.statusCode));

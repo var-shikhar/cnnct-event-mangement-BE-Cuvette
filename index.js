@@ -6,7 +6,7 @@ import connectDB from './middleware/db.js';
 
 configDotenv();
 
-const { PORT, FRONTEND_PORT, DEV_FRONTEND_PORT } = process.env;
+const { PORT, FRONTEND_PORT, RENDER_FRONTED_PORT, DEV_FRONTEND_PORT } = process.env;
 const SERVER_PORT = PORT || 3000;
 const app = express();
 await connectDB();
@@ -16,7 +16,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
     cors({
-        origin: [FRONTEND_PORT, DEV_FRONTEND_PORT],
+        origin: [FRONTEND_PORT, RENDER_FRONTED_PORT, DEV_FRONTEND_PORT],
         credentials: true,
     })
 );
@@ -28,7 +28,7 @@ import eventRoutes from './routes/events.js';
 app.use("/auth", authRoutes);
 app.use('/event', eventRoutes);
 
-app.get("/", (req, res) => res.send("Server is running 🚀"));
+// Error Middleware
 app.use(errorMiddleware);
 
 

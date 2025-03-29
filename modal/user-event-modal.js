@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+// User Event Schema (Participant Lists)
 const userEventSchema = new mongoose.Schema({
     eventID: { type: mongoose.Schema.Types.ObjectId, ref: 'Event', required: true },
     userID: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

@@ -22,6 +22,7 @@ const postLogin = async (req, res, next) => {
             return next(new CustomError("Invalid credentials", RouteCode.CONFLICT.statusCode));
         }
 
+        // Check if the password is correct
         const isValidPassword = await bcrypt.compare(password, foundUser.password);
         if (!isValidPassword) {
             return next(new CustomError("Invalid credentials, email or password is incorrect", RouteCode.CONFLICT.statusCode));
@@ -50,23 +51,22 @@ const postLogin = async (req, res, next) => {
         });
 
 
+        // Send successful login response to the client
         const userDetail = {
             id: foundUser._id,
             name: foundUser.firstName + ' ' + foundUser.lastName,
             email: foundUser.email,
             hasPreferences: foundUser.preferences?.length > 0,
         }
-
-        // Send successful login response
         return res.status(RouteCode.SUCCESS.statusCode).json(userDetail);
     } catch (error) {
         return next(error);
     }
 };
+
 // Register Controller
 const postRegister = async (req, res, next) => {
     const { firstName, lastName, email, password, confirmPassword } = req.body;
-    console.log(req.body)
     if (!firstName || !lastName || !email || !password || !confirmPassword) {
         return next(new CustomError("Invalid details shared!", RouteCode.BAD_REQUEST.statusCode));
     }
@@ -81,8 +81,8 @@ const postRegister = async (req, res, next) => {
             return next(new CustomError("User already exists!", RouteCode.BAD_REQUEST.statusCode));
         }
 
+        // Hash the password
         const hashedPassword = await bcrypt.hash(password, Number(SALT));
-
         const newUser = new User({
             firstName,
             lastName,
@@ -97,9 +97,11 @@ const postRegister = async (req, res, next) => {
         return next(error);
     }
 };
+
 // Logout Controller
 const getLogout = async (req, res, next) => {
     try {
+        // Get the refresh token from the cookies
         const refreshToken = req.cookies.refresh_token;
         if (!refreshToken) {
             return next(new CustomError("Something went wrong", RouteCode.BAD_REQUEST.statusCode));
@@ -155,6 +157,7 @@ const postSetPreferences = async (req, res, next) => {
 // User's Profile Settings
 const getUserDetail = async (req, res, next) => {
     try {
+        // Get the user details via a helper function which return the current user
         const foundUser = await getReqUser(req, res, next);
         const userDetails = {
             firstName: foundUser.firstName ?? 'N/a',
@@ -169,31 +172,49 @@ const getUserDetail = async (req, res, next) => {
         next(error);
     }
 }
+
 // Update User's Profile
 const putUserDetail = async (req, res, next) => {
     const { firstName, lastName, email, phone, password, confirmPassword } = req.body;
+    // Validate required fields
     if (!firstName || !lastName || !email || !phone) {
         return next(new CustomError("Invaild Fields", RouteCode.CONFLICT.statusCode));
     }
 
-    if (password !== confirmPassword) {
-        return next(new CustomError('Password does not match', RouteCode.CONFLICT.statusCode))
+    if (password && password !== confirmPassword) {
+        return next(new CustomError("Password does not match", RouteCode.CONFLICT.statusCode));
     }
-
     try {
         const foundUser = await getReqUser(req, res, next);
+
+        // Check if their are another user with the same email
+        if (foundUser.email !== email) {
+            const existingUser = await User.findOne({ email, _id: { $ne: foundUser._id } });
+            if (existingUser) {
+                return next(new CustomError("Email already in use", RouteCode.CONFLICT.statusCode));
+            }
+        }
 
         foundUser.firstName = firstName.trim();
         foundUser.lastName = lastName.trim();
         foundUser.email = email.trim();
         foundUser.contact = phone.trim();
 
+
+        // Update the password if provided
         if (password) {
             const hashedPassword = await bcrypt.hash(password, Number(SALT));
             foundUser.password = hashedPassword;
-        }
-        await foundUser.save();
+            foundUser.refresh_token = null;
+            await foundUser.save();
 
+            // Clear cookies to logout the user
+            res.clearCookie("access_token");
+            res.clearCookie("refresh_token");
+            return res.status(RouteCode.SUCCESS.statusCode).json({ message: 'Profile updated successfully, Please login again' });
+        }
+
+        await foundUser.save();
         return res.status(RouteCode.SUCCESS.statusCode).json({ message: 'Profile updated successfully' });
     } catch (error) {
         next(error);
@@ -208,6 +229,7 @@ const getUsersAvailability = async (req, res, next) => {
             return res.status(200).json({});
         }
 
+        // Convert the availability object to an array
         const userAvailability = Object.entries(foundUser.day_availability).reduce((acc, [key, value]) => {
             acc[key] = {
                 day: key,
@@ -226,6 +248,7 @@ const getUsersAvailability = async (req, res, next) => {
         next(error)
     }
 }
+
 // Put User Availability
 const putUserAvailability = async (req, res, next) => {
     const userAvailability = req.body;
@@ -238,12 +261,9 @@ const putUserAvailability = async (req, res, next) => {
 
     try {
         const foundUser = await getReqUser(req, res, next);
+        if (!foundUser.day_availability) foundUser.day_availability = {};
 
-        if (!foundUser.day_availability) {
-            foundUser.day_availability = {};
-        }
-
-
+        // Update the availability
         foundUser.day_availability = Object.entries(userAvailability).reduce((acc, [key, value]) => {
             acc[key] = {
                 available: value.isAvailable,

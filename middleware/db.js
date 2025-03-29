@@ -3,15 +3,16 @@ import { configDotenv } from 'dotenv';
 import mongoose from 'mongoose';
 import User from '../modal/user-modal.js';
 
-
 configDotenv();
 const { MONGO_URI, SALT } = process.env;
 
+// Connect to MongoDB
 const connectDB = async () => {
     try {
         await mongoose.connect(MONGO_URI);
 
         const userCount = await User.countDocuments();
+        // If the user count is zero, create an admin user
         if (userCount === 0) {
             const hashedPassword = await bcrypt.hash('Admin@123', Number(SALT));
             let adminUser = new User({

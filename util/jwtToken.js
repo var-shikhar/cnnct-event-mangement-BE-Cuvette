@@ -15,6 +15,7 @@ export const verifyJWTToken = (token, type) => {
     return decoded
 };
 
+// Check if the token is expired
 export const isTokenExpired = (decodedToken) => {
     const currentTimestamp = Math.floor(Date.now() / 1000);
     return decodedToken.exp < currentTimestamp;

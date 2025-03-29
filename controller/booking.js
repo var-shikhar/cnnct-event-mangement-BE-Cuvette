@@ -4,6 +4,7 @@ import RouteCode from "../util/httpStatus.js";
 import getReqUser from '../util/reqUser.js';
 import { findIfUserIsAvailable } from "./events.js";
 
+// Get Booking List (Based on Filters)
 const getBookingList = async (req, res, next) => {
     const { status } = req.query;
     if (!status) return next(new CustomError("Invalid status!", RouteCode.BAD_REQUEST.statusCode));
@@ -67,6 +68,7 @@ const getBookingList = async (req, res, next) => {
         next(error);
     }
 }
+
 // Update the status of a booking
 const updateBookingStatus = async (req, res, next) => {
     const { id, status } = req.body;
@@ -75,12 +77,12 @@ const updateBookingStatus = async (req, res, next) => {
         const foundUser = await getReqUser(req, res, next);
         const currentDate = new Date();
 
+        // Find the current event where the user is a participant
         const foundUserEvent = await UserEvent.findOne({ userID: foundUser._id, eventID: id }).populate("eventID");
         if (!foundUserEvent) return next(new CustomError("Booking not found!", RouteCode.NOT_FOUND.statusCode));
 
         const eventDate = new Date(foundUserEvent.eventID.eventStDateTime);
-        if (eventDate < currentDate)
-            return next(new CustomError("Event has ended already!", RouteCode.NOT_FOUND.statusCode));
+        if (eventDate < currentDate) return next(new CustomError("Event has ended already!", RouteCode.NOT_FOUND.statusCode));
 
         // Only accept the events if you're available at that time.
         if (status === 'accepted') {

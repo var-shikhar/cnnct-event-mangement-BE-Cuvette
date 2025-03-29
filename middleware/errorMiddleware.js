@@ -73,4 +73,3 @@ const errorMiddleware = (err, req, res, next) => {
 };
 
 export default errorMiddleware;
-// Error Middleware = {message: 'Something went wrong', statusCode: 200}
