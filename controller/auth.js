@@ -38,15 +38,15 @@ const postLogin = async (req, res, next) => {
 
         res.cookie("access_token", accessToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "Lax",
+            secure: true,
+            sameSite: "None",
             path: "/",
         });
 
         res.cookie("refresh_token", refreshToken, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === "production",
-            sameSite: "Lax",
+            secure: true,
+            sameSite: "None",
             path: "/",
         });
 
