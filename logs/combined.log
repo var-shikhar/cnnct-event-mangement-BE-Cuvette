@@ -1,0 +1,1 @@
+{"ip":"::1","level":"error","message":"Invalid credentials, email or password is incorrect","method":"POST","stack":"Error: Invalid credentials, email or password is incorrect\n    at postLogin (file:///C:/Users/hp/Downloads/event-management-cuvette/backend/controller/auth.js:27:25)","status":409,"timestamp":"2025-03-29T09:21:43.765Z","url":"/auth/login"}
