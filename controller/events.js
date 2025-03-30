@@ -2,6 +2,7 @@ import { CustomError } from "../middleware/errorMiddleware.js";
 import Event from "../modal/event-modal.js";
 import UserEvent from "../modal/user-event-modal.js";
 import User from "../modal/user-modal.js";
+import { formatTo12Hour, getFormattedDate } from "../util/date.js";
 import RouteCode from "../util/httpStatus.js";
 import getReqUser from '../util/reqUser.js';
 
@@ -43,11 +44,16 @@ const getEventsList = async (req, res, next) => {
 
         // Fetch events where the user is a participant (accepted status)
         const participantEvents = await UserEvent.find({ userID: foundUser._id, status: "accepted" }).populate("eventID");
-        const participantEventTimes = participantEvents?.map(entry => ({
-            eventID: entry.eventID._id.toString(),
-            eventStDateTime: new Date(entry.eventID.eventStDateTime),
-            eventEdDateTime: new Date(entry.eventID.eventEdDateTime),
-        }));
+        const participantEventTimes = participantEvents?.map(entry => {
+            if (!entry.eventID || !entry.eventID.eventStDateTime || !entry.eventID.eventEdDateTime) return null;
+
+            return {
+                eventID: entry.eventID._id.toString(),
+                eventStDateTime: new Date(entry.eventID.eventStDateTime),
+                eventEdDateTime: new Date(entry.eventID.eventEdDateTime),
+            };
+        }).filter(e => e);
+
 
         const finalList = userEvents.map(eve => {
             const userEventStart = new Date(eve.eventStDateTime);
@@ -55,23 +61,16 @@ const getEventsList = async (req, res, next) => {
 
             // Check if this event overlaps with any participant event
             const hasConflict = participantEventTimes.some(partEve =>
-                (userEventStart < partEve.eventEdDateTime && userEventEnd > partEve.eventStDateTime)
+                userEventStart.getTime() < partEve.eventEdDateTime.getTime() &&
+                userEventEnd.getTime() > partEve.eventStDateTime.getTime()
             );
 
             return {
                 eventID: eve._id,
                 eventTitle: eve.eventTitle,
                 eventDate: eve.eventStDateTime,
-                eventStTime: userEventStart.toLocaleTimeString("en-US", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                }),
-                eventEdTime: userEventEnd.toLocaleTimeString("en-US", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                }),
+                eventStTime: formatTo12Hour(userEventStart),
+                eventEdTime: formatTo12Hour(userEventEnd),
                 eventDuration: eve.eventDuration,
                 eventLink: eve.eventLink,
                 isActive: eve.isActive,
@@ -102,8 +101,8 @@ const getEventsListForCalendar = async (req, res, next) => {
             return {
                 id: item._id,
                 title: item.eventTitle,
-                start: item.eventStDateTime,
-                end: item.eventEdDateTime,
+                start: item.eventStDateTime.toISOString(),
+                end: item.eventEdDateTime.toISOString(),
                 status: item.isActive,
             }
         });
@@ -113,8 +112,8 @@ const getEventsListForCalendar = async (req, res, next) => {
                 return {
                     id: item.eventID._id,
                     title: item.eventID.eventTitle,
-                    start: item.eventID.eventStDateTime,
-                    end: item.eventID.eventEdDateTime,
+                    start: item.eventID.eventStDateTime.toISOString(),
+                    end: item.eventID.eventEdDateTime.toISOString(),
                     status: item.status,
                 }
             });
@@ -136,12 +135,13 @@ const postEvent = async (req, res, next) => {
         const foundSimilarName = await Event.findOne({ eventTitle: topic.trim() });
         if (foundSimilarName) return next(new CustomError('Event with same name already exists!', RouteCode.CONFLICT.statusCode));
 
-        const eventStDateTime = new Date(`${date}T${time}:00`);
+
         let durationInMinutes = { "30m": 30, "1hr": 60, "2hr": 120 }[duration] || 30;
+        const eventStDateTime = getFormattedDate(date, time);
         const eventEdDateTime = new Date(eventStDateTime.getTime() + durationInMinutes * 60000);
 
         // Validate If the user is available to create events for the given time
-        const timeValidation = await findIfUserIsAvailable(eventStDateTime, eventEdDateTime, date, foundUser);
+        const timeValidation = await findIfUserIsAvailable(eventStDateTime, eventEdDateTime, foundUser, '');
         if (timeValidation.status !== RouteCode.SUCCESS.statusCode) return next(new CustomError(timeValidation.message, timeValidation.status));
 
 
@@ -208,51 +208,42 @@ const eventParticipants = async (participants, eventID) => {
 }
 
 // Find If User is available in the defined time slot
-export const findIfUserIsAvailable = async (startTime, endTime, date, foundUser, eventID = "") => {
-    const eventDay = startTime.toLocaleString('en-US', { weekday: 'short' });
+export const findIfUserIsAvailable = async (startDateTime, endDateTime, foundUser, eventID = "") => {
+    const eventDay = startDateTime.toLocaleString('en-US', { weekday: 'short' });
 
     // Check if the user is available on this day
-    if (!foundUser.day_availability[eventDay] || !foundUser.day_availability[eventDay].available) {
-        return { status: RouteCode.CONFLICT.statusCode, message: `You are not available on ${eventDay}!` };
-    }
-
+    if (!foundUser.day_availability[eventDay] || !foundUser.day_availability[eventDay].available) return { status: RouteCode.CONFLICT.statusCode, message: `You are not available on ${eventDay}!` };
 
     // Check if the user already has an event scheduled at this time
     const query = {
         hostID: foundUser._id,
-        $and: [{ eventStDateTime: { $lt: endTime } }, { eventEdDateTime: { $gt: startTime } }]
+        $and: [{ eventStDateTime: { $lt: endDateTime } }, { eventEdDateTime: { $gt: startDateTime } }]
     };
-
     // Exclude the current event if eventID is provided
-    if (eventID) query._id = { $ne: eventID };
+    if (eventID !== '') query._id = { $ne: eventID };
 
     const conflictingEvent = await Event.findOne(query);
 
-    // const conflictingEvent = await Event.findOne({
-    //     hostID: foundUser._id,
-    //     _id: { $ne: eventID },
-    //     $or: [{ eventStDateTime: { $lt: endTime }, eventEdDateTime: { $gt: startTime } }]
-    // });
     if (conflictingEvent) {
+        const conflictStTime = formatTo12Hour(conflictingEvent.eventStDateTime);
+        const conflictEdTime = formatTo12Hour(conflictingEvent.eventEdDateTime);
         return {
             status: RouteCode.CONFLICT.statusCode,
-            message: `You already have an event at ${conflictingEvent.eventStDateTime.toLocaleTimeString()}-${conflictingEvent.eventEdDateTime.toLocaleTimeString()} on ${eventDay}!`,
+            message: `You already have an event at ${conflictStTime}-${conflictEdTime} on ${eventDay}!`,
         };
     }
+
 
     // Check if event time falls within an available slot
     const availableSlots = foundUser.day_availability[eventDay].slots || [];
     for (const slot of availableSlots) {
         if (!slot.start || !slot.end) continue;
 
-        const slotStart = new Date(`${date}T${slot.start}:00`);
-        const slotEnd = new Date(`${date}T${slot.end}:00`);
+        const formattedStTime = getFormattedDate(startDateTime, slot.start);
+        const formattedEdTime = getFormattedDate(startDateTime, slot.end);
 
-        if (startTime >= slotStart && endTime <= slotEnd) {
-            return {
-                status: RouteCode.SUCCESS.statusCode,
-                message: '',
-            };
+        if (startDateTime >= formattedStTime && endDateTime <= formattedEdTime) {
+            return { status: RouteCode.SUCCESS.statusCode, message: '' };
         }
     }
 
@@ -272,9 +263,8 @@ const getEventDetailByID = async (req, res, next) => {
         const foundEvent = await Event.findById(eventID);
         if (!foundEvent) return next(new CustomError("Event not found!", RouteCode.NOT_FOUND.statusCode));
 
-        const eventDate = new Date(foundEvent.eventStDateTime);
-        const formattedDate = eventDate.toISOString().split("T")[0];
-        const formattedTime = eventDate.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+        const formattedDate = foundEvent.eventStDateTime.toISOString().split("T")[0];
+        const formattedTime = foundEvent.eventStDateTime.toISOString().split("T")[1].substring(0, 5);
 
         const participants = await UserEvent.find({ eventID }).populate('userID', 'email').select('userID');
         const participantsList = participants?.map(p => p.userID.email) ?? [];
@@ -315,12 +305,13 @@ const patchEventDetailByID = async (req, res, next) => {
         // Check if the user is the host of the event
         if (foundEvent.hostID.toString() !== foundUser._id.toString()) return next(new CustomError("You are not authorized to update this event!", RouteCode.UNAUTHORIZED.statusCode));
 
-        const eventStDateTime = new Date(`${date}T${time}:00`);
+
         let durationInMinutes = { "30m": 30, "1hr": 60, "2hr": 120 }[duration] || 30;
+        const eventStDateTime = getFormattedDate(date, time);
         const eventEdDateTime = new Date(eventStDateTime.getTime() + durationInMinutes * 60000);
 
         // Check if the user is available at the time of the event
-        const timeValidation = await findIfUserIsAvailable(eventStDateTime, eventEdDateTime, date, foundUser, id);
+        const timeValidation = await findIfUserIsAvailable(eventStDateTime, eventEdDateTime, foundUser, id);
         if (timeValidation.status !== RouteCode.SUCCESS.statusCode) return next(new CustomError(timeValidation.message, timeValidation.status));
 
         foundEvent.eventTitle = topic.trim();

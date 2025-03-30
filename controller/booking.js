@@ -1,5 +1,6 @@
 import { CustomError } from "../middleware/errorMiddleware.js";
 import UserEvent from "../modal/user-event-modal.js";
+import { formatTo12Hour } from "../util/date.js";
 import RouteCode from "../util/httpStatus.js";
 import getReqUser from '../util/reqUser.js';
 import { findIfUserIsAvailable } from "./events.js";
@@ -24,16 +25,8 @@ const getBookingList = async (req, res, next) => {
                 id: event._id,
                 eventTitle: event.eventTitle,
                 eventDate: event.eventStDateTime,
-                eventStTime: new Date(event.eventStDateTime).toLocaleTimeString("en-US", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                }),
-                eventEdTime: new Date(event.eventEdDateTime).toLocaleTimeString("en-US", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    hour12: true,
-                }),
+                eventStTime: formatTo12Hour(event.eventStDateTime),
+                eventEdTime: formatTo12Hour(event.eventEdDateTime),
                 status: entry.status,
                 participants: [],
             };
@@ -86,7 +79,7 @@ const updateBookingStatus = async (req, res, next) => {
 
         // Only accept the events if you're available at that time.
         if (status === 'accepted') {
-            const { message, status } = await findIfUserIsAvailable(foundUserEvent.eventID.eventStDateTime, foundUserEvent.eventID.eventEdDateTime, foundUserEvent.eventID.eventStDateTime, foundUser)
+            const { message, status } = await findIfUserIsAvailable(foundUserEvent.eventID.eventStDateTime, foundUserEvent.eventID.eventEdDateTime, foundUser, foundUserEvent.eventID._id);
             if (status !== RouteCode.SUCCESS.statusCode) return next(new CustomError(message, status));
         }
         foundUserEvent.status = status;
