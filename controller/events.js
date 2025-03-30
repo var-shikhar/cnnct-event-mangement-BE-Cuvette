@@ -208,7 +208,7 @@ const eventParticipants = async (participants, eventID) => {
 }
 
 // Find If User is available in the defined time slot
-export const findIfUserIsAvailable = async (startTime, endTime, date, foundUser) => {
+export const findIfUserIsAvailable = async (startTime, endTime, date, foundUser, eventID = "") => {
     const eventDay = startTime.toLocaleString('en-US', { weekday: 'short' });
 
     // Check if the user is available on this day
@@ -218,10 +218,21 @@ export const findIfUserIsAvailable = async (startTime, endTime, date, foundUser)
 
 
     // Check if the user already has an event scheduled at this time
-    const conflictingEvent = await Event.findOne({
+    const query = {
         hostID: foundUser._id,
-        $or: [{ eventStDateTime: { $lt: endTime }, eventEdDateTime: { $gt: startTime } }]
-    });
+        $and: [{ eventStDateTime: { $lt: endTime } }, { eventEdDateTime: { $gt: startTime } }]
+    };
+
+    // Exclude the current event if eventID is provided
+    if (eventID) query._id = { $ne: eventID };
+
+    const conflictingEvent = await Event.findOne(query);
+
+    // const conflictingEvent = await Event.findOne({
+    //     hostID: foundUser._id,
+    //     _id: { $ne: eventID },
+    //     $or: [{ eventStDateTime: { $lt: endTime }, eventEdDateTime: { $gt: startTime } }]
+    // });
     if (conflictingEvent) {
         return {
             status: RouteCode.CONFLICT.statusCode,
@@ -309,7 +320,7 @@ const patchEventDetailByID = async (req, res, next) => {
         const eventEdDateTime = new Date(eventStDateTime.getTime() + durationInMinutes * 60000);
 
         // Check if the user is available at the time of the event
-        const timeValidation = await findIfUserIsAvailable(eventStDateTime, eventEdDateTime, date, foundUser);
+        const timeValidation = await findIfUserIsAvailable(eventStDateTime, eventEdDateTime, date, foundUser, id);
         if (timeValidation.status !== RouteCode.SUCCESS.statusCode) return next(new CustomError(timeValidation.message, timeValidation.status));
 
         foundEvent.eventTitle = topic.trim();
